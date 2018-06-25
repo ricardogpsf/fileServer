@@ -1,8 +1,9 @@
 import socket
 
 from src.services.file_handler import FileHandler
+from src.services.security_service import SecurityService
 
-DATA_LENGTH = 1024
+SIZE_TO_RECEIVE_STREAM = 1024
 
 
 class ClientService:
@@ -11,9 +12,16 @@ class ClientService:
         self.host = host
         self.port = port
         self.conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.security = None
 
     def start(self):
+        self.security = SecurityService()
         self.conn.connect((self.host, self.port))
+
+        data = self.conn.recv(SIZE_TO_RECEIVE_STREAM)
+        print("Recebendo data {}".format(data.decode()))
+        self.conn.send(str(self.security.pub_key).encode())
+        self.security.set_friend_pub_key(data.decode())
 
         self.send_option('menu')
         self.receive_simple_text()
@@ -35,21 +43,23 @@ class ClientService:
                 self.receive_simple_text()
 
     def receive_simple_text(self):
-        data = self.conn.recv(DATA_LENGTH)
+        data = self.conn.recv(SIZE_TO_RECEIVE_STREAM)
+        data = self.security.decrypt(data)
         print(data.decode() + '\n')
 
     def send_option(self, option_text):
-        self.conn.send(option_text.encode())
+        msg = self.security.encrypt(option_text.encode())
+        self.conn.send(msg)
 
     def download_file(self, option_text):
         self.send_option(option_text)
         file_path = './downloaded/' + option_text.split(' ')[1]
-        FileHandler(file_path).handle_download_file(self.conn)
+        FileHandler(file_path, self.conn, self.security).handle_download_file()
 
     def upload_file(self, option_text):
         self.send_option(option_text)
         file_name = option_text.split(' ')[1]
-        FileHandler('./downloaded/' + file_name).handle_upload_file(self.conn)
+        FileHandler('./downloaded/' + file_name, self.conn, self.security).handle_upload_file()
 
 
 if __name__ == '__main__':

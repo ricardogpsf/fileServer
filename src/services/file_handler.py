@@ -1,22 +1,26 @@
 import queue
 import threading
 
-BUF_SIZE = 1024
+SIZE_TO_READ_FILE = 1024
+SIZE_TO_RECEIVE_STREAM = 1464
 
 
 class FileHandler:
 
-    def __init__(self, file_name):
+    def __init__(self, file_name, connection, security):
         self.file_path = file_name
+        self.connection = connection
+        self.security = security
 
-    def handle_download_file(self, connection):
+    def handle_download_file(self):
         data_queue = queue.Queue()
         threading.Thread(target=self.save_downloaded_file, args=(data_queue,)).start()
 
         while True:
-            data = connection.recv(BUF_SIZE)
+            data_encr = self.connection.recv(SIZE_TO_RECEIVE_STREAM)
+            data = self.security.decrypt(data_encr)
             data_queue.put(data)
-            if not data or data[len(data) - 1] == 0:
+            if not data or data[len(data)-1] == 0:
                 break
 
     def save_downloaded_file(self, data_queue):
@@ -39,17 +43,25 @@ class FileHandler:
 
         print("File '{}' downloaded.".format(self.file_path))
 
-    def handle_upload_file(self, connection):
+    def handle_upload_file(self):
         try:
             f = open(self.file_path, 'r')
             print("Sending file '{}'...".format(self.file_path))
-            data = f.read(BUF_SIZE)
+            send_end_text_char = True
+            data = f.read(SIZE_TO_READ_FILE)
             while data:
-                connection.send(data.encode())
-                data = f.read(BUF_SIZE)
+                if len(data) < SIZE_TO_READ_FILE:
+                    data += '\0'
+                    send_end_text_char = False
+
+                msg = self.security.encrypt(data.encode())
+                self.connection.send(msg)
+                data = f.read(SIZE_TO_READ_FILE)
             f.close()
+
+            if send_end_text_char:
+                self.connection.send(self.security.encrypt(b'\0'))
+
             print("File '{}' sent.".format(self.file_path))
         except FileNotFoundError as e:
             print(e)
-
-        connection.send(b'\0')
